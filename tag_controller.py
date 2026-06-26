@@ -169,6 +169,14 @@ def main():
                     except (serial.SerialException, OSError):
                         raise  # bubble to the reconnect handler below
 
+                    if not line:
+                        # Flaky USB-serial adapters (CH340 clones) can drop their
+                        # /dev node WITHOUT raising here — readline just times out.
+                        # Detect the vanished node and force a reconnect.
+                        if not os.path.exists(port):
+                            raise OSError(f"serial node {port} disappeared")
+                        continue
+
                     if not line.startswith("UID:"):
                         continue
 
