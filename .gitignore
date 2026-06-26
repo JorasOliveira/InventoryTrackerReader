@@ -1,0 +1,10 @@
+# Python virtual env & caches
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Local output / data / secrets
+rfid_tags.txt
+*.db
+.env
