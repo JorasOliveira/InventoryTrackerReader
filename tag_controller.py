@@ -27,6 +27,7 @@ import os
 import sys
 import glob
 import time
+import threading
 import webbrowser
 
 try:
@@ -163,16 +164,32 @@ def main():
                 time.sleep(2)  # opening the port resets the Arduino; let it boot
                 print("Ready. Present a tag. Press Ctrl+C to stop.\n")
 
+                # Watchdog: a yanked USB-serial adapter (CH340 clone) makes
+                # readline() block forever instead of erroring, so a background
+                # thread closes the port the moment its /dev node disappears —
+                # that unblocks the read, triggers the reconnect, and releases
+                # the fd so the node can re-register.
+                stop_watchdog = threading.Event()
+
+                def watchdog():
+                    while not stop_watchdog.wait(0.5):
+                        if not os.path.exists(port):
+                            print(f"! serial node {port} vanished; closing port...")
+                            try:
+                                ser.close()
+                            except Exception:
+                                pass
+                            return
+
+                threading.Thread(target=watchdog, daemon=True).start()
+
                 while True:
                     try:
                         line = ser.readline().decode("utf-8", errors="replace").strip()
-                    except (serial.SerialException, OSError):
+                    except (serial.SerialException, OSError, TypeError):
                         raise  # bubble to the reconnect handler below
 
                     if not line:
-                        # Flaky USB-serial adapters (CH340 clones) can drop their
-                        # /dev node WITHOUT raising here — readline just times out.
-                        # Detect the vanished node and force a reconnect.
                         if not os.path.exists(port):
                             raise OSError(f"serial node {port} disappeared")
                         continue
@@ -189,10 +206,15 @@ def main():
                     last_uid, last_time = uid, now
 
                     handle_scan(ser, uid)
-        except (serial.SerialException, OSError) as e:
+        except (serial.SerialException, OSError, TypeError) as e:
             print(f"! serial connection lost ({e}); reconnecting...\n")
             last_uid, last_time = None, 0.0  # clear debounce across reconnects
             time.sleep(2)
+        finally:
+            try:
+                stop_watchdog.set()
+            except NameError:
+                pass
 
 
 if __name__ == "__main__":
